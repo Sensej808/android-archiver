@@ -40,16 +40,18 @@ android {
         }
     }
     buildFeatures {
-        viewBinding = true
+        compose = true
     }
 
     // Настройки Compose
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.3" // Используйте актуальную версию
+        kotlinCompilerExtensionVersion = "1.5.15"
     }
+
 }
 
 dependencies {
+
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
