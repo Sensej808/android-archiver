@@ -42,6 +42,11 @@ android {
     buildFeatures {
         viewBinding = true
     }
+
+    // Настройки Compose
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.3" // Используйте актуальную версию
+    }
 }
 
 dependencies {
@@ -53,4 +58,13 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+
+    implementation(libs.androidx.activity.compose) // Для поддержки Compose в Activity
+    implementation(libs.androidx.compose.ui) // Основная библиотека Compose
+    implementation(libs.androidx.compose.material3) // Material Design 3 компоненты
+    implementation(libs.androidx.compose.ui.tooling.preview) // Поддержка предпросмотра
+    debugImplementation(libs.androidx.compose.ui.tooling) // Инструменты для отладки
+    implementation(libs.androidx.compose.runtime.livedata) // Интеграция с LiveData (опционально)
+    implementation(libs.androidx.navigation.compose) // Навигация в Compose (опционально)
+
 }
