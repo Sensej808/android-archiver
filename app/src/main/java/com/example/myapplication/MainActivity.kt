@@ -13,7 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.myapplication.ui.theme.AndroidArchiverTheme
-
+import com.example.myapplication.HomeScreen
 class MainActivity : ComponentActivity() {
 
 //    private lateinit var binding: ActivityMainBinding
@@ -26,7 +26,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    Greeting(stringFromJNI())
+                    HomeScreen()
                 }
             }
         }
