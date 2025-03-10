@@ -20,6 +20,8 @@ import androidx.compose.material3.Icon
 import android.content.Context
 import android.database.Cursor
 import android.provider.OpenableColumns
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun HomeScreen(){
@@ -38,9 +40,13 @@ fun HomeScreen(){
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment =  Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
     ){
-        Text(text="Архиватор файлов")
+        Text(
+            text="Архиватор файлов",
+            fontSize = 36.sp,
+            fontStyle = FontStyle.Italic,
+
+            )
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
@@ -70,13 +76,16 @@ fun HomeScreen(){
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+
                     ) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = (context.contentResolver.getType(uri)?.let { it } ?: "Неизвестный тип") +"     " + fileName,
 
-                            style = MaterialTheme.typography.bodyMedium
+                            style = MaterialTheme.typography.bodyMedium,
+
                         )
                     }
                 }

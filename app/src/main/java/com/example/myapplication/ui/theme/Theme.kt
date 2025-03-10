@@ -15,11 +15,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFFF6FFE5), // Основной цвет
-    secondary = Color(0xFFEFFFD1), // второй цвет
+    primary = Color(0xFF00BCD4), // Основной цвет
+    secondary = Color(0xFFFFFFFF), // второй цвет
     background = Color(0xFFFFFFFF), // цвет фона
-    surface = Color(0xFFCDCBCB), // цвет поверхностей
-    onPrimary = Color(0xFFFFFFFF), // Цвет текста на основном цвете
+    surface = Color(0xFF009688), // цвет поверхностей
+    onPrimary = Color(0xFF000000), // Цвет текста на основном цвете
     onSecondary = Color(0xFF000000), // Цвет текста на вторичном цвете
     onBackground = Color(0xFF000000), // Цвет текста на фоне
     onSurface = Color(0xFF000000), // Цвет текста на поверхности
