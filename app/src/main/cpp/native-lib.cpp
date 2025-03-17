@@ -1,10 +1,16 @@
 #include <jni.h>
 #include <string>
+#include <vector>
+#include <fstream>
 
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_example_myapplication_MainActivity_stringFromJNI(
+
+// JNI-функция для сжатия файла
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_example_myapplication_MainActivity_compressFile(
         JNIEnv* env,
-        jobject /* this */) {
-    std::string hello = "Hello from C++";
-    return env->NewStringUTF(hello.c_str());
+        jobject /* this */,
+        jstring inputPath,
+        jstring outputPath
+        ) {
+    return true;
 }

@@ -36,7 +36,7 @@ class MainActivity : ComponentActivity() {
      * A native method that is implemented by the 'myapplication' native library,
      * which is packaged with this application.
      */
-    external fun stringFromJNI(): String
+    external fun compressFile(inputPath: String, outputPath: String): Boolean
 
     companion object {
         // Used to load the 'myapplication' library on application startup.
