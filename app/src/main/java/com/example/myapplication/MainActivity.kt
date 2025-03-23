@@ -36,8 +36,8 @@ class MainActivity : ComponentActivity() {
      * A native method that is implemented by the 'myapplication' native library,
      * which is packaged with this application.
      */
-    external fun compressFile(inputPath: String, outputPath: String): Boolean
-
+    external fun compressFile(fileUri: String, archiveType: String): ByteArray
+    external fun createArchive(compressedData: ByteArray, outputPath: String, archiveType: String): String
     companion object {
         // Used to load the 'myapplication' library on application startup.
         init {
