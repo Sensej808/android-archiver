@@ -36,8 +36,28 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
 import com.example.myapplication.ui.theme.AndroidArchiverTheme
-import com.example.myapplication.HomeScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+
+
+class MainViewModel : ViewModel() {
+    suspend fun compressFiles(uris: List<String>, activity: MainActivity): List<ByteArray> =
+        withContext(Dispatchers.Default) {
+            uris.map { uri ->
+                async {
+                    activity.compressFile(uri, "zip")
+                }
+
+            }.awaitAll() // ждем все корутины
+        }
+}
+
+
 class MainActivity : ComponentActivity() {
 
 //    private lateinit var binding: ActivityMainBinding
@@ -71,6 +91,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+
 
 
 
