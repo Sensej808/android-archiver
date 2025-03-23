@@ -72,20 +72,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-fun Greeting(name: String) {
-    Text(
-        text = "Hello, $name!",
-        style = MaterialTheme.typography.titleLarge,
-        color = MaterialTheme.colorScheme.primary
-    )
-}
+
 
 @Preview(showBackground = true)
 @Composable
 fun DefaultPreview() {
     AndroidArchiverTheme {
-        Greeting("Android")
+        HomeScreen()
     }
 }
 
