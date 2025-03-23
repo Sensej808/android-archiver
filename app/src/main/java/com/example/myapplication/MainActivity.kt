@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.util.Log
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,6 +28,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,14 +46,23 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 
 
 class MainViewModel : ViewModel() {
+
     suspend fun compressFiles(uris: List<String>, activity: MainActivity): List<ByteArray> =
         withContext(Dispatchers.Default) {
             uris.map { uri ->
                 async {
-                    activity.compressFile(uri, "zip")
+                    try {
+                        Log.d("Archiver", "Начало сжатия: ${uri}")
+
+                        activity.compressFile(uri, "zip")
+                    }
+                    catch (e: Exception){
+                        ByteArray(0)
+                    }
                 }
 
             }.awaitAll() // ждем все корутины
@@ -108,6 +120,7 @@ fun DefaultPreview() {
 @Composable
 fun HomeScreen(){
     val context =  LocalContext.current
+    val activity = context as MainActivity
     //сохранение при повороте экрана
     var selectedFiles by rememberSaveable { mutableStateOf(listOf<Uri>()) }
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -118,6 +131,11 @@ fun HomeScreen(){
             selectedFiles = uris
         }
     }
+
+    val viewModel = remember { MainViewModel()}
+    var compressedFiles by rememberSaveable { mutableStateOf(listOf<ByteArray>()) }
+    var errorMessage by rememberSaveable { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope() // Создаём scope для корутин
 
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -145,7 +163,7 @@ fun HomeScreen(){
         if (selectedFiles.isNotEmpty()) {
             Text(text = "Выбранные файлы:")
 
-            LazyColumn(
+            var lazy = LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
@@ -177,10 +195,24 @@ fun HomeScreen(){
         }
         Button(
             modifier = Modifier.padding(horizontal = 16.dp),
-            onClick = {}
+            onClick = {
+                coroutineScope.launch {
+                    try {
+                        var compressedFiles =
+                            viewModel.compressFiles(selectedFiles.map { it.toString() }, activity)
+                    }
+                    catch (e: Exception){
+                        errorMessage = "Ошибка ${e.message}"
+                    }
+                }
+            }
         ) {
             Text(text="Создать архив")
         }
+
+    if (errorMessage.isNotEmpty()){
+        Text(text = errorMessage, color = MaterialTheme.colorScheme.error, fontSize = 14.sp)
+    }
 
     }
 
