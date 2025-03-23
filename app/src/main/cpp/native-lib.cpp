@@ -86,9 +86,13 @@ void write_to_zip(zip_t* zip) {
 // JNI-функция для создания ZIP-архива
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_example_myapplication_MainActivity_createZip(JNIEnv *env, jobject thiz,
-                                                      jobjectArray file_paths,
-                                                      jstring output_zip_path) {
+Java_com_example_myapplication_MainActivity_createZip(
+        JNIEnv *env,
+        jobject thiz,
+        jobjectArray file_paths,
+        jstring output_zip_path,
+        jobject progress_callback // Callback для обновления прогресса
+) {
     const char* output_path = env->GetStringUTFChars(output_zip_path, nullptr);
 
     // Создаем ZIP-архив
@@ -107,29 +111,17 @@ Java_com_example_myapplication_MainActivity_createZip(JNIEnv *env, jobject thiz,
         jstring file_path = (jstring) env->GetObjectArrayElement(file_paths, i);
         const char* file_path_str = env->GetStringUTFChars(file_path, nullptr);
 
-        threads.emplace_back(compress_file, std::string(file_path_str), std::string(file_path_str));
+        // Обрабатываем файл
+        compress_file(file_path_str, file_path_str);
+
+        // Обновляем прогресс
+        jclass callback_class = env->GetObjectClass(progress_callback);
+        jmethodID update_progress_method = env->GetMethodID(callback_class, "onProgressUpdate", "(F)V");
+        env->CallVoidMethod(progress_callback, update_progress_method, (i + 1.0f) / length);
 
         env->ReleaseStringUTFChars(file_path, file_path_str);
         env->DeleteLocalRef(file_path);
     }
-
-    // Запускаем поток для записи в архив
-    std::thread writer(write_to_zip, zip);
-
-    // Ожидаем завершения всех потоков
-    for (auto& t : threads) {
-        t.join();
-    }
-
-    // Сообщаем writer-потоку, что работа завершена
-    {
-        std::lock_guard<std::mutex> lock(mtx);
-        done = true;
-    }
-    cv.notify_one();
-
-    // Ожидаем завершения writer-потока
-    writer.join();
 
     // Закрываем ZIP-архив
     zip_close(zip);

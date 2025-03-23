@@ -34,34 +34,47 @@ import android.provider.MediaStore
 
 class MainViewModel : ViewModel() {
 
-    suspend fun compressFiles(uris: List<Uri>, activity: MainActivity, resultName: String = "archive"): Boolean =
-        withContext(Dispatchers.Default) {
-            try {
-                Log.d("Archiver", "Начало сжатия файлов")
+    suspend fun compressFiles(
+        uris: List<Uri>,
+        activity: MainActivity,
+        outputZipPath: String,
+        resultName: String = "archive",
+        onProgressUpdate: MainActivity.ProgressCallback // Лямбда для обновления прогресса
+    ): Boolean = withContext(Dispatchers.Default) {
+        try {
+            Log.d("Archiver", "Начало сжатия файлов")
 
-                // Преобразуем URI в абсолютные пути
-                val filePaths = uris.map { uri ->
-                    getFilePathFromUri(activity, uri)
-                }.toTypedArray()
+            // Преобразуем URI в абсолютные пути
+            val filePaths = uris.map { uri ->
+                getFilePathFromUri(activity, uri)
+            }.toTypedArray()
 
-                // Временный путь для сохранения ZIP-архива
-                val tempZipPath = "${activity.cacheDir.absolutePath}/$resultName.zip"
+            // Путь для сохранения ZIP-архива
+            val absZipPath = "$outputZipPath/$resultName.zip"
 
-                // Вызываем нативный метод для создания ZIP-архива
-                val result = activity.createZip(filePaths, tempZipPath)
-
-                if (result) {
-                    Log.d("Archiver", "ZIP-архив успешно создан: $tempZipPath")
-                    true
-                } else {
-                    Log.e("Archiver", "Ошибка создания ZIP-архива")
-                    false
+            // Создаем объект, реализующий ProgressCallback
+            val progressCallback = object : MainActivity.ProgressCallback {
+                override fun onProgressUpdate(progress: Float) {
+                    println("Прогресс: ${(progress * 100).toInt()}%") // Вывод в консоль
+                    //onProgressUpdate(progress) // Передаем прогресс в UI
                 }
-            } catch (e: Exception) {
-                Log.e("Archiver", "Ошибка: ${e.message}")
+            }
+
+            // Вызываем нативный метод для создания ZIP-архива
+            val result = activity.createZip(filePaths, absZipPath, progressCallback)
+
+            if (result) {
+                Log.d("Archiver", "ZIP-архив успешно создан: $absZipPath")
+                true
+            } else {
+                Log.e("Archiver", "Ошибка создания ZIP-архива")
                 false
             }
+        } catch (e: Exception) {
+            Log.e("Archiver", "Ошибка: ${e.message}")
+            false
         }
+    }
 
     // Функция для преобразования URI в путь
     private fun getFilePathFromUri(context: Context, uri: Uri): String {
@@ -94,6 +107,10 @@ class MainViewModel : ViewModel() {
 
 class MainActivity : ComponentActivity() {
 
+    interface ProgressCallback {
+        fun onProgressUpdate(progress: Float)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -107,7 +124,8 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    external fun createZip(filePaths: Array<String>, outputZipPath: String): Boolean
+
+    external fun createZip(filePaths: Array<String>, outputZipPath: String, progressCallback: ProgressCallback): Boolean
 
     companion object {
         init {
@@ -199,7 +217,13 @@ fun HomeScreen() {
                 coroutineScope.launch {
                     try {
                         val outputZipPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).path
-                        val result = viewModel.compressFiles(selectedFiles, activity, outputZipPath)
+                        val progressCallback = object : MainActivity.ProgressCallback {
+                            override fun onProgressUpdate(progress: Float) {
+                                // Выводим прогресс в консоль
+                                println("Прогресс: ${(progress * 100).toInt()}%")
+                            }
+                        }
+                        val result = viewModel.compressFiles(selectedFiles, activity, outputZipPath, onProgressUpdate = progressCallback)
                         if (result) {
                             isArchiveCreated = true
                             errorMessage = ""
