@@ -32,9 +32,3 @@ Java_com_example_myapplication_MainActivity_createArchive(JNIEnv *env, jobject t
     env->ReleaseStringUTFChars(archive_type, type);
     return result;
 }
-extern "C"
-JNIEXPORT jbyteArray JNICALL
-Java_com_example_myapplication_MainActivity_compressFile(JNIEnv *env, jobject thiz,
-                                                         jstring file_uri, jstring archive_type) {
-    // TODO: implement compressFile()
-}
