@@ -2,77 +2,97 @@ package com.example.myapplication
 
 import android.content.Context
 import android.net.Uri
-import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.util.Log
-import android.widget.TextView
+import android.os.Environment
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import com.example.myapplication.ui.theme.AndroidArchiverTheme
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import android.content.ContentValues
+import android.provider.MediaStore
 
 class MainViewModel : ViewModel() {
 
-    suspend fun compressFiles(uris: List<String>, activity: MainActivity): List<ByteArray> =
+    suspend fun compressFiles(uris: List<Uri>, activity: MainActivity, resultName: String = "archive"): Boolean =
         withContext(Dispatchers.Default) {
-            uris.map { uri ->
-                async {
-                    try {
-                        Log.d("Archiver", "Начало сжатия: ${uri}")
+            try {
+                Log.d("Archiver", "Начало сжатия файлов")
 
-                        activity.compressFile(uri, "zip")
-                    }
-                    catch (e: Exception){
-                        ByteArray(0)
-                    }
+                // Преобразуем URI в абсолютные пути
+                val filePaths = uris.map { uri ->
+                    getFilePathFromUri(activity, uri)
+                }.toTypedArray()
+
+                // Временный путь для сохранения ZIP-архива
+                val tempZipPath = "${activity.cacheDir.absolutePath}/$resultName.zip"
+
+                // Вызываем нативный метод для создания ZIP-архива
+                val result = activity.createZip(filePaths, tempZipPath)
+
+                if (result) {
+                    Log.d("Archiver", "ZIP-архив успешно создан: $tempZipPath")
+                    true
+                } else {
+                    Log.e("Archiver", "Ошибка создания ZIP-архива")
+                    false
+                }
+            } catch (e: Exception) {
+                Log.e("Archiver", "Ошибка: ${e.message}")
+                false
+            }
+        }
+
+    // Функция для преобразования URI в путь
+    private fun getFilePathFromUri(context: Context, uri: Uri): String {
+        val contentResolver = context.contentResolver
+        val cursor = contentResolver.query(uri, null, null, null, null)
+        cursor?.use {
+            if (it.moveToFirst()) {
+                // Пытаемся получить имя файла из столбца DISPLAY_NAME
+                val displayNameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val displayName = if (displayNameIndex != -1) {
+                    it.getString(displayNameIndex)
+                } else {
+                    // Если столбец DISPLAY_NAME не найден, используем последний сегмент URI
+                    uri.lastPathSegment ?: "unknown_file"
                 }
 
-            }.awaitAll() // ждем все корутины
+                // Создаем файл в кэше приложения
+                val file = File(context.cacheDir, displayName)
+                val inputStream = contentResolver.openInputStream(uri)
+                val outputStream = FileOutputStream(file)
+                inputStream?.copyTo(outputStream)
+                inputStream?.close()
+                outputStream.close()
+                return file.absolutePath
+            }
         }
+        throw IllegalArgumentException("Не удалось получить путь из Uri: $uri")
+    }
 }
 
-
 class MainActivity : ComponentActivity() {
-
-//    private lateinit var binding: ActivityMainBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,26 +107,14 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
-    /**
-     * A native method that is implemented by the 'myapplication' native library,
-     * which is packaged with this application.
-     */
-
-    external fun compressFile(fileUri: String, archiveType: String): ByteArray
-    external fun createArchive(compressedData: ByteArray, outputPath: String, archiveType: String): String
+    external fun createZip(filePaths: Array<String>, outputZipPath: String): Boolean
 
     companion object {
-        // Used to load the 'myapplication' library on application startup.
         init {
             System.loadLibrary("myapplication")
         }
     }
 }
-
-
-
-
 
 @Preview(showBackground = true)
 @Composable
@@ -116,37 +124,33 @@ fun DefaultPreview() {
     }
 }
 
-
 @Composable
-fun HomeScreen(){
-    val context =  LocalContext.current
+fun HomeScreen() {
+    val context = LocalContext.current
     val activity = context as MainActivity
-    //сохранение при повороте экрана
     var selectedFiles by rememberSaveable { mutableStateOf(listOf<Uri>()) }
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
-    ){
-            uris ->
-        if (uris != null){
+    ) { uris ->
+        if (uris != null) {
             selectedFiles = uris
         }
     }
 
-    val viewModel = remember { MainViewModel()}
-    var compressedFiles by rememberSaveable { mutableStateOf(listOf<ByteArray>()) }
+    val viewModel = remember { MainViewModel() }
     var errorMessage by rememberSaveable { mutableStateOf("") }
-    val coroutineScope = rememberCoroutineScope() // Создаём scope для корутин
+    var isArchiveCreated by rememberSaveable { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier.fillMaxSize(),
-        horizontalAlignment =  Alignment.CenterHorizontally,
-    ){
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(
-            text="Архиватор файлов",
+            text = "Архиватор файлов",
             fontSize = 36.sp,
             fontStyle = FontStyle.Italic,
-
-            )
+        )
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
@@ -154,23 +158,21 @@ fun HomeScreen(){
                 filePickerLauncher.launch(arrayOf("*/*"))
             },
             modifier = Modifier.padding(horizontal = 16.dp)
-        )
-        {
-            Text(text="Выбрать файлы")
+        ) {
+            Text(text = "Выбрать файлы")
         }
         Spacer(modifier = Modifier.height(16.dp))
 
         if (selectedFiles.isNotEmpty()) {
             Text(text = "Выбранные файлы:")
 
-            var lazy = LazyColumn(
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
             ) {
-                // Используем itemsCount для указания количества элементов
-                items(count = selectedFiles.size) { index ->
-                    val uri = selectedFiles.getOrNull(index) ?: return@items
+                items(selectedFiles.size) { index ->
+                    val uri = selectedFiles[index]
                     val fileName = getFileName(context, uri)
                     Row(
                         modifier = Modifier
@@ -178,47 +180,50 @@ fun HomeScreen(){
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
-
                     ) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = (context.contentResolver.getType(uri)?.let { it } ?: "Неизвестный тип") +"     " + fileName,
-
+                            text = (context.contentResolver.getType(uri)?.let { it } ?: "Неизвестный тип") + "     " + fileName,
                             style = MaterialTheme.typography.bodyMedium,
-
-                            )
+                        )
                     }
                 }
             }
         } else {
             Text(text = "Файлы не выбраны")
         }
+
         Button(
             modifier = Modifier.padding(horizontal = 16.dp),
             onClick = {
                 coroutineScope.launch {
                     try {
-                        var compressedFiles =
-                            viewModel.compressFiles(selectedFiles.map { it.toString() }, activity)
-                    }
-                    catch (e: Exception){
-                        errorMessage = "Ошибка ${e.message}"
+                        val outputZipPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).path
+                        val result = viewModel.compressFiles(selectedFiles, activity, outputZipPath)
+                        if (result) {
+                            isArchiveCreated = true
+                            errorMessage = ""
+                        } else {
+                            errorMessage = "Ошибка создания архива"
+                        }
+                    } catch (e: Exception) {
+                        errorMessage = "Ошибка: ${e.message}"
                     }
                 }
             }
         ) {
-            Text(text="Создать архив")
+            Text(text = "Создать архив")
         }
 
-    if (errorMessage.isNotEmpty()){
-        Text(text = errorMessage, color = MaterialTheme.colorScheme.error, fontSize = 14.sp)
-    }
+        if (errorMessage.isNotEmpty()) {
+            Text(text = errorMessage, color = MaterialTheme.colorScheme.error, fontSize = 14.sp)
+        }
 
+        if (isArchiveCreated) {
+            Text(text = "Архив успешно создан!", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+        }
     }
-
 }
-
-
 
 // Функция для получения имени файла
 fun getFileName(context: Context, uri: Uri): String {
