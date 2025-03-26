@@ -23,34 +23,29 @@ int active_workers = 0;
 
 // Функция для извлечения имени файла из пути
 std::string get_file_name(const std::string& file_path) {
-    LOGD("[1] Entering get_file_name()");
+
     size_t last_slash = file_path.find_last_of("/\\");
     if (last_slash == std::string::npos) {
-        LOGD("[2] No slashes in path, returning full path");
         return file_path;
     }
-    LOGD("[3] Extracted filename from path");
     return file_path.substr(last_slash + 1);
 }
 
 // Функция для сжатия данных с использованием zlib
 std::vector<char> compress_data(const std::vector<char>& input) {
-    LOGD("[4] Starting compress_data()");
     std::vector<char> output;
     z_stream zs = {};
     if (deflateInit(&zs, Z_DEFAULT_COMPRESSION) != Z_OK) {
-        LOGD("[5] deflateInit() failed");
+        LOGD("deflateInit() failed");
         return output;
     }
 
-    LOGD("[6] deflateInit() succeeded");
     const size_t buffer_size = 1024 * 1024;
     std::vector<char> buffer(buffer_size);
 
     zs.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(input.data()));
     zs.avail_in = input.size();
 
-    LOGD("[7] Starting compression loop");
     int ret;
     do {
         zs.next_out = reinterpret_cast<Bytef*>(buffer.data());
@@ -62,85 +57,70 @@ std::vector<char> compress_data(const std::vector<char>& input) {
             break;
         }
 
-        LOGD("[9] Compressed chunk size: %zu", buffer.size() - zs.avail_out);
+        //LOGD("[9] Compressed chunk size: %zu", buffer.size() - zs.avail_out);
         size_t compressed_size = buffer.size() - zs.avail_out;
         output.insert(output.end(), buffer.begin(), buffer.begin() + compressed_size);
     } while (zs.avail_out == 0);
 
-    LOGD("[10] Finished compression, calling deflateEnd()");
     deflateEnd(&zs);
     return output;
 }
 
 // Функция для сжатия файла
 void compress_file(const std::string& file_path) {
-    LOGD("[11] Starting compress_file() for: %s", file_path.c_str());
+    //LOGD("[11] Starting compress_file() for: %s", file_path.c_str());
     std::string file_name = get_file_name(file_path);
 
-    LOGD("[12] Opening file: %s", file_path.c_str());
     std::ifstream input_file(file_path, std::ios::binary | std::ios::ate);
     if (!input_file) {
         LOGD("[ERROR] Failed to open file: %s", file_path.c_str());
         return;
     }
 
-    LOGD("[13] Getting file size");
     std::streamsize size = input_file.tellg();
     input_file.seekg(0, std::ios::beg);
 
-    LOGD("[14] Reading file data");
     std::vector<char> buffer(size);
     if (!input_file.read(buffer.data(), size)) {
         LOGD("[ERROR] Failed to read file: %s", file_path.c_str());
         return;
     }
 
-    LOGD("[15] Compressing data");
     std::vector<char> compressed_data = compress_data(buffer);
 
     // Добавляем сжатые данные в очередь
     {
-        LOGD("[16] Locking mutex to push data");
         std::lock_guard<std::mutex> lock(mtx);
         compressed_files.push({file_name, compressed_data});
     }
-    LOGD("[17] Notifying writer thread");
     cv.notify_one();
 }
 
 // Функция для записи сжатых данных в ZIP-архив
 void write_to_zip(zip_t* zip) {
-    LOGD("[18] Writer thread started");
     while (true) {
-        LOGD("[19] Waiting for data or completion signal");
         std::unique_lock<std::mutex> lock(mtx);
         cv.wait(lock, [] { return !compressed_files.empty() || (done && active_workers == 0); });
 
-        LOGD("[20] Condition met - checking state");
         if (compressed_files.empty() && done && active_workers == 0) {
-            LOGD("[21] No more work - exiting writer thread");
             break;
         }
 
         if (compressed_files.empty()) {
-            LOGD("[22] Spurious wakeup - continuing");
             continue;
         }
 
-        LOGD("[23] Getting next file from queue");
         auto file_data = compressed_files.front();
         compressed_files.pop();
         lock.unlock();
 
         // Добавляем файл в архив
-        LOGD("[24] Creating zip source for: %s", file_data.first.c_str());
         zip_source_t* source = zip_source_buffer(zip, file_data.second.data(), file_data.second.size(), 0);
         if (!source) {
             LOGD("[ERROR] Failed to create zip source for: %s", file_data.first.c_str());
             continue;
         }
 
-        LOGD("[25] Adding file to zip: %s", file_data.first.c_str());
         if (zip_file_add(zip, file_data.first.c_str(), source, ZIP_FL_ENC_UTF_8) < 0) {
             LOGD("[ERROR] Failed to add file to zip: %s", file_data.first.c_str());
             zip_source_free(source);
@@ -158,9 +138,7 @@ Java_com_example_myapplication_MainActivity_createZip(
         jstring output_zip_path,
         jobject progress_callback
 ) {
-    LOGD("[26] JNI createZip() started");
     const char* output_path = env->GetStringUTFChars(output_zip_path, nullptr);
-    LOGD("[27] Output path: %s", output_path);
 
     // Получаем глобальные ссылки
     jobject global_callback = env->NewGlobalRef(progress_callback);
