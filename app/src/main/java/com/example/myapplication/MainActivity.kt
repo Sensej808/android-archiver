@@ -1,46 +1,24 @@
 package com.example.myapplication
 
-import android.annotation.SuppressLint
-import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
-import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
+import android.os.Environment
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Button
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
@@ -57,7 +35,6 @@ class MainViewModel : ViewModel() {
     private val _progress = MutableStateFlow(0f)
     val progress: StateFlow<Float> = _progress
 
-    @SuppressLint("NewApi")
     suspend fun compressFiles(
         uris: List<Uri>,
         context: Context,
@@ -73,48 +50,20 @@ class MainViewModel : ViewModel() {
             }.toTypedArray()
 
             val absZipPath = "$outputZipPath/$resultName.zip"
-            val tempZipFile = File(absZipPath)
 
             val result = (context as MainActivity).createZip(filePaths, absZipPath, object : MainActivity.ProgressCallback {
                 override fun onProgressUpdate(progress: Float) {
-                    println("Прогресс: ${(progress * 100).toInt()}%") // Вывод в консоль
-                    //onProgressUpdate(progress) // Передаем прогресс в UI
+                    progressCallback.onProgressUpdate(progress)
                     _progress.value = progress
                 }
-            }
+            })
 
-           // for (i in 1..100) {
-                //Thread.sleep(50)
-                //progressCallback.onProgressUpdate(i / 100f)
-            //}
-
-            // Вызываем нативный метод для создания ZIP-архива
-
-
-            val result = activity.createZip(filePaths, absZipPath, progressCallback)
-
-
-
-            // Сохраняем ZIP в "Загрузки" через MediaStore
-            val resolver = activity.contentResolver
-            val contentValues = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, "$resultName.zip")
-                put(MediaStore.Downloads.MIME_TYPE, "application/zip")
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-            }
-
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-            uri?.let { outputUri ->
-                resolver.openOutputStream(outputUri)?.use { outputStream ->
-                    tempZipFile.inputStream().use { inputStream ->
-                        inputStream.copyTo(outputStream)
-                    }
-                }
-                Log.d("Archiver", "ZIP-архив успешно сохранён: $outputUri")
-                return@withContext true
-            } ?: run {
-                Log.e("Archiver", "Ошибка при сохранении через MediaStore")
-                return@withContext false
+            if (result) {
+                Log.d("Archiver", "ZIP-архив успешно создан: $absZipPath")
+                true
+            } else {
+                Log.e("Archiver", "Ошибка создания ZIP-архива")
+                false
             }
         } catch (e: Exception) {
             Log.e("Archiver", "Ошибка: ${e.message}")
@@ -176,6 +125,7 @@ fun HomeScreen() {
     val viewModel = remember { MainViewModel() }
     val coroutineScope = rememberCoroutineScope()
     val progress by viewModel.progress.collectAsState()
+    var isArchiveCreated by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -237,10 +187,6 @@ fun HomeScreen() {
             }
         ) {
             Text(text = "Создать архив")
-        }
-
-        if (errorMessage.isNotEmpty()) {
-            Text(text = errorMessage, color = MaterialTheme.colorScheme.error, fontSize = 14.sp)
         }
 
         if (progress > 0f && progress < 1f) {
