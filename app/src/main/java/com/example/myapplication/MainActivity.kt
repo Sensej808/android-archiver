@@ -269,7 +269,7 @@ fun HomeScreen() {
             onClick = {
                 coroutineScope.launch {
                     try {
-                        val outputZipPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).path
+                        val outputZipPath = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.path ?: ""
                         val progressCallback = object : MainActivity.ProgressCallback {
                             override fun onProgressUpdate(progress: Float) {
                                 // Выводим прогресс в консоль
