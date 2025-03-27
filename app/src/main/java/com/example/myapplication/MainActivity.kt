@@ -88,15 +88,16 @@ class MainViewModel : ViewModel() {
                 }
             }
 
-            // for (i in 1..100) {
-            //Thread.sleep(50)
-            //progressCallback.onProgressUpdate(i / 100f)
-            //}
 
             // Вызываем нативный метод для создания ZIP-архива
 
 
             val result = activity.createZip(filePaths, absZipPath, progressCallback)
+
+            if (!result || !tempZipFile.exists()) {
+                Log.e("Archiver", "Ошибка создания ZIP-архива")
+                false
+            }
 
 
 
