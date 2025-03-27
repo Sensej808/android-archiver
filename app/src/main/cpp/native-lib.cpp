@@ -195,7 +195,7 @@ Java_com_example_myapplication_MainActivity_createZip(
                 jmethodID update_progress_method = thread_env->GetMethodID(
                         (jclass)global_callback_class, "onProgressUpdate", "(F)V");
                 thread_env->CallVoidMethod(global_callback, update_progress_method,
-                                           (length - active_workers) * 100 / length);
+                                           (jfloat)(length - active_workers) / length);
             }
             cv.notify_one();
 
