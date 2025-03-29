@@ -59,9 +59,7 @@ import java.io.FileOutputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-
 class MainViewModel : ViewModel() {
-
     private val _progress = MutableStateFlow(0f)
     val progress: StateFlow<Float> = _progress
 
@@ -70,86 +68,41 @@ class MainViewModel : ViewModel() {
         uris: List<Uri>,
         activity: MainActivity,
         outputZipPath: String,
-        resultName: String = "archive",
-        onProgressUpdate: MainActivity.ProgressCallback // Лямбда для обновления прогресса
-    ): Boolean = withContext(Dispatchers.Default) {
+        onProgressUpdate: MainActivity.ProgressCallback
+    ): Boolean = withContext(Dispatchers.IO) {
         try {
             Log.d("Archiver", "Начало сжатия файлов")
 
-            // Преобразуем URI в абсолютные пути
             val filePaths = uris.map { uri ->
                 getFilePathFromUri(activity, uri)
             }.toTypedArray()
 
-            // Путь для сохранения ZIP-архива
-            val absZipPath = "$outputZipPath/$resultName.zip"
-            val tempZipFile = File(absZipPath)
-
-            // Создаем объект, реализующий ProgressCallback
             val progressCallback = object : MainActivity.ProgressCallback {
                 override fun onProgressUpdate(progress: Float) {
-                    println("Прогресс: ${(progress * 100).toInt()}%") // Вывод в консоль
-                    //onProgressUpdate(progress) // Передаем прогресс в UI
+                    println("Прогресс: ${(progress * 100).toInt()}%")
                     _progress.value = progress
                 }
             }
 
-
-            // Вызываем нативный метод для создания ZIP-архива
-
-
-            val result = activity.createZip(filePaths, absZipPath, progressCallback)
-
-            if (!result || !tempZipFile.exists()) {
-                Log.e("Archiver", "Ошибка создания ZIP-архива")
-                false
-            }
-
-
-
-            // Сохраняем ZIP в "Загрузки" через MediaStore
-            val resolver = activity.contentResolver
-            val contentValues = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, "$resultName.zip")
-                put(MediaStore.Downloads.MIME_TYPE, "application/zip")
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-            }
-
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-            uri?.let { outputUri ->
-                resolver.openOutputStream(outputUri)?.use { outputStream ->
-                    tempZipFile.inputStream().use { inputStream ->
-                        inputStream.copyTo(outputStream)
-                    }
-                }
-                Log.d("Archiver", "ZIP-архив успешно сохранён: $outputUri")
-                return@withContext true
-            } ?: run {
-                Log.e("Archiver", "Ошибка при сохранении через MediaStore")
-                return@withContext false
-            }
+            return@withContext activity.createZip(filePaths, outputZipPath, progressCallback)
         } catch (e: Exception) {
             Log.e("Archiver", "Ошибка: ${e.message}", e)
             false
         }
     }
 
-    // Функция для преобразования URI в путь
     private fun getFilePathFromUri(context: Context, uri: Uri): String {
         val contentResolver = context.contentResolver
         val cursor = contentResolver.query(uri, null, null, null, null)
         cursor?.use {
             if (it.moveToFirst()) {
-                // Пытаемся получить имя файла из столбца DISPLAY_NAME
                 val displayNameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 val displayName = if (displayNameIndex != -1) {
                     it.getString(displayNameIndex)
                 } else {
-                    // Если столбец DISPLAY_NAME не найден, используем последний сегмент URI
                     uri.lastPathSegment ?: "unknown_file"
                 }
 
-                // Создаем файл в кэше приложения
                 val file = File(context.cacheDir, displayName)
                 val inputStream = contentResolver.openInputStream(uri)
                 val outputStream = FileOutputStream(file)
@@ -164,7 +117,6 @@ class MainViewModel : ViewModel() {
 }
 
 class MainActivity : ComponentActivity() {
-
     interface ProgressCallback {
         fun onProgressUpdate(progress: Float)
     }
@@ -192,19 +144,18 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Preview(showBackground = true)
-@Composable
-fun DefaultPreview() {
-    AndroidArchiverTheme {
-        HomeScreen()
-    }
-}
-
 @Composable
 fun HomeScreen() {
     val context = LocalContext.current
     val activity = context as MainActivity
     var selectedFiles by rememberSaveable { mutableStateOf(listOf<Uri>()) }
+    var errorMessage by rememberSaveable { mutableStateOf("") }
+    var isArchiveCreated by rememberSaveable { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    val viewModel = remember { MainViewModel() }
+    val progress by viewModel.progress.collectAsState()
+
+    // Лончер для выбора файлов
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
@@ -213,11 +164,62 @@ fun HomeScreen() {
         }
     }
 
-    val viewModel = remember { MainViewModel() }
-    var errorMessage by rememberSaveable { mutableStateOf("") }
-    var isArchiveCreated by rememberSaveable { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
-    val progress by viewModel.progress.collectAsState()
+    // Лончер для выбора места сохранения архива
+    val saveArchiveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip"),
+        onResult = { uri ->
+            if (uri != null) {
+                coroutineScope.launch {
+                    try {
+                        val progressCallback = object : MainActivity.ProgressCallback {
+                            override fun onProgressUpdate(progress: Float) {
+                                println("Прогресс: ${(progress * 100).toInt()}%")
+                            }
+                        }
+
+                        // Сначала создаем архив во временной директории
+                        val tempDir = context.cacheDir
+                        val tempZipPath = File(tempDir, "temp_archive_${System.currentTimeMillis()}.zip").absolutePath
+
+                        val result = viewModel.compressFiles(
+                            selectedFiles,
+                            activity,
+                            tempZipPath,
+                            progressCallback
+                        )
+
+                        if (result) {
+                            // Копируем временный файл в выбранное место
+                            context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                                File(tempZipPath).inputStream().use { inputStream ->
+                                    inputStream.copyTo(outputStream)
+                                }
+                            }
+                            isArchiveCreated = true
+                            errorMessage = ""
+                            // Удаляем временный файл
+                            File(tempZipPath).delete()
+                        } else {
+                            errorMessage = "Ошибка создания архива"
+                        }
+                    } catch (e: Exception) {
+                        errorMessage = "Ошибка: ${e.message ?: "неизвестная ошибка"}"
+                    }
+                }
+            }
+        }
+    )
+
+    // Функция для создания архива
+    fun createArchive() {
+        if (selectedFiles.isEmpty()) {
+            errorMessage = "Файлы не выбраны"
+            return
+        }
+
+        // Запрашиваем у пользователя место для сохранения архива
+        saveArchiveLauncher.launch("archive_${System.currentTimeMillis()}.zip")
+    }
 
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -272,28 +274,8 @@ fun HomeScreen() {
 
         Button(
             modifier = Modifier.padding(horizontal = 16.dp),
-            onClick = {
-                coroutineScope.launch {
-                    try {
-                        val outputZipPath = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.path ?: ""
-                        val progressCallback = object : MainActivity.ProgressCallback {
-                            override fun onProgressUpdate(progress: Float) {
-                                // Выводим прогресс в консоль
-                                println("Прогресс: ${(progress * 100).toInt()}%")
-                            }
-                        }
-                        val result = viewModel.compressFiles(selectedFiles, activity, outputZipPath, onProgressUpdate = progressCallback)
-                        if (result) {
-                            isArchiveCreated = true
-                            errorMessage = ""
-                        } else {
-                            errorMessage = "Ошибка создания архива"
-                        }
-                    } catch (e: Exception) {
-                        errorMessage = "Ошибка: ${e.message}"
-                    }
-                }
-            }
+            onClick = { createArchive() },
+            enabled = selectedFiles.isNotEmpty()
         ) {
             Text(text = "Создать архив")
         }
@@ -308,17 +290,31 @@ fun HomeScreen() {
         }
 
         if (progress > 0f && progress < 1f) {
-            Column {
-                LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                Text(text = "Прогресс: ${(progress * 100).toInt()}%", modifier = Modifier.padding(8.dp))
+            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                LinearProgressIndicator(progress = { progress })
+                Text(
+                    text = "Прогресс: ${(progress * 100).toInt()}%",
+                    modifier = Modifier.padding(8.dp)
+                )
             }
         } else if (isArchiveCreated) {
-            Text(text = "Архив успешно создан!", color = MaterialTheme.colorScheme.primary)
+            Text(
+                text = "Архив успешно создан!",
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(16.dp)
+            )
         }
     }
 }
 
-// Функция для получения имени файла
+@Preview(showBackground = true)
+@Composable
+fun DefaultPreview() {
+    AndroidArchiverTheme {
+        HomeScreen()
+    }
+}
+
 fun getFileName(context: Context, uri: Uri): String {
     var fileName = "Неизвестный файл"
     context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
