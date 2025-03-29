@@ -35,7 +35,7 @@ std::string get_file_name(const std::string& file_path) {
 std::vector<char> compress_data(const std::vector<char>& input) {
     std::vector<char> output;
     z_stream zs = {};
-    if (deflateInit(&zs, Z_DEFAULT_COMPRESSION) != Z_OK) {
+    if (deflateInit(&zs, Z_BEST_COMPRESSION) != Z_OK) {
         LOGD("deflateInit() failed");
         return output;
     }
@@ -91,7 +91,7 @@ void compress_file(const std::string& file_path) {
     // Добавляем сжатые данные в очередь
     {
         std::lock_guard<std::mutex> lock(mtx);
-        compressed_files.push({file_name, compressed_data});
+        compressed_files.push({file_name, buffer});
     }
     cv.notify_one();
 }
@@ -111,6 +111,7 @@ void write_to_zip(zip_t* zip) {
         }
 
         auto file_data = compressed_files.front();
+        LOGD("write file %s", file_data.first.c_str());
         compressed_files.pop();
         lock.unlock();
 
@@ -147,6 +148,7 @@ Java_com_example_myapplication_MainActivity_createZip(
     // Создаем ZIP-архив
     int err = 0;
     zip_t* zip = zip_open(output_path, ZIP_CREATE | ZIP_TRUNCATE, &err);
+
     if (!zip) {
         LOGD("[ERROR] Failed to create zip at %s (error: %d)", output_path, err);
         env->ReleaseStringUTFChars(output_zip_path, output_path);
@@ -154,7 +156,7 @@ Java_com_example_myapplication_MainActivity_createZip(
         env->DeleteGlobalRef(global_callback_class);
         return false;
     }
-
+    LOGD("Сreate zip at %s", output_path);
     // Получаем JavaVM для прикрепления потоков
     JavaVM* java_vm;
     env->GetJavaVM(&java_vm);
