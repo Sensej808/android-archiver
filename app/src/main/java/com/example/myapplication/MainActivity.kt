@@ -1,19 +1,13 @@
 package com.example.myapplication
 
-import android.Manifest
 import android.annotation.SuppressLint
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.provider.MediaStore
 import android.provider.OpenableColumns
-import android.provider.Settings
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -28,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -48,43 +43,49 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import com.example.myapplication.ui.theme.AndroidArchiverTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.FileOutputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
 
 class MainViewModel : ViewModel() {
     private val _progress = MutableStateFlow(0f)
     val progress: StateFlow<Float> = _progress
 
+    private val _currentFileIndex = MutableStateFlow(0)
+    val currentFileIndex: StateFlow<Int> = _currentFileIndex
+
+    private val _totalFiles = MutableStateFlow(0)
+    val totalFiles: StateFlow<Int> = _totalFiles
+
     @SuppressLint("NewApi")
     suspend fun compressFiles(
         uris: List<Uri>,
         activity: MainActivity,
-        outputZipPath: String,
-        onProgressUpdate: MainActivity.ProgressCallback
+        outputZipPath: String
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             Log.d("Archiver", "Начало сжатия файлов")
+            _totalFiles.value = uris.size
+            _currentFileIndex.value = 0
 
-            val filePaths = uris.map { uri ->
+            val filePaths = uris.mapIndexed { index, uri ->
+                _currentFileIndex.value = index + 1
+                _progress.value = (index + 1).toFloat() / uris.size
                 getFilePathFromUri(activity, uri)
             }.toTypedArray()
 
-            val progressCallback = object : MainActivity.ProgressCallback {
-                override fun onProgressUpdate(progress: Float) {
-                    println("Прогресс: ${(progress * 100).toInt()}%")
-                    _progress.value = progress
-                }
+            return@withContext activity.createZip(filePaths, outputZipPath) { progress ->
+                _progress.value = progress
             }
-
-            return@withContext activity.createZip(filePaths, outputZipPath, progressCallback)
         } catch (e: Exception) {
             Log.e("Archiver", "Ошибка: ${e.message}", e)
             false
@@ -114,13 +115,15 @@ class MainViewModel : ViewModel() {
         }
         throw IllegalArgumentException("Не удалось получить путь из Uri: $uri")
     }
+
+    fun resetProgress() {
+        _progress.value = 0f
+        _currentFileIndex.value = 0
+        _totalFiles.value = 0
+    }
 }
 
 class MainActivity : ComponentActivity() {
-    interface ProgressCallback {
-        fun onProgressUpdate(progress: Float)
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -135,7 +138,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    external fun createZip(filePaths: Array<String>, outputZipPath: String, progressCallback: ProgressCallback): Boolean
+    external fun createZip(
+        filePaths: Array<String>,
+        outputZipPath: String,
+        progressCallback: (Float) -> Unit
+    ): Boolean
 
     companion object {
         init {
@@ -150,79 +157,98 @@ fun HomeScreen() {
     val activity = context as MainActivity
     var selectedFiles by rememberSaveable { mutableStateOf(listOf<Uri>()) }
     var errorMessage by rememberSaveable { mutableStateOf("") }
-    var isArchiveCreated by rememberSaveable { mutableStateOf(false) }
+    var isArchiveReady by rememberSaveable { mutableStateOf(false) }
+    var tempZipPath by rememberSaveable { mutableStateOf("") }
     val coroutineScope = rememberCoroutineScope()
     val viewModel = remember { MainViewModel() }
     val progress by viewModel.progress.collectAsState()
+    val currentFileIndex by viewModel.currentFileIndex.collectAsState()
+    val totalFiles by viewModel.totalFiles.collectAsState()
 
-    // Лончер для выбора файлов
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
-        if (uris != null) {
+        if (uris.isNullOrEmpty()) {
+            errorMessage = "Файлы не выбраны"
+        } else {
             selectedFiles = uris
+            isArchiveReady = false
+            viewModel.resetProgress()
+            errorMessage = ""
         }
     }
 
-    // Лончер для выбора места сохранения архива
     val saveArchiveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/zip"),
         onResult = { uri ->
             if (uri != null) {
                 coroutineScope.launch {
                     try {
-                        val progressCallback = object : MainActivity.ProgressCallback {
-                            override fun onProgressUpdate(progress: Float) {
-                                println("Прогресс: ${(progress * 100).toInt()}%")
+                        val tempFile = File(tempZipPath)
+                        if (tempFile.exists()) {
+                            val inputStream: InputStream = tempFile.inputStream()
+                            val outputStream: OutputStream? = context.contentResolver.openOutputStream(uri)
+
+                            outputStream?.let {
+                                inputStream.copyTo(it)
+                                inputStream.close()
+                                it.close()
+                                tempFile.delete()
+
+                                Toast.makeText(
+                                    context,
+                                    "Архив успешно сохранён",
+                                    Toast.LENGTH_LONG
+                                ).show()
+
+                                tryOpenFolderWithArchive(context, uri)
+                            } ?: run {
+                                errorMessage = "Не удалось сохранить архив"
                             }
-                        }
-
-                        // Сначала создаем архив во временной директории
-                        val tempDir = context.cacheDir
-                        val tempZipPath = File(tempDir, "temp_archive_${System.currentTimeMillis()}.zip").absolutePath
-
-                        val result = viewModel.compressFiles(
-                            selectedFiles,
-                            activity,
-                            tempZipPath,
-                            progressCallback
-                        )
-
-                        if (result) {
-                            // Копируем временный файл в выбранное место
-                            context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-                                File(tempZipPath).inputStream().use { inputStream ->
-                                    inputStream.copyTo(outputStream)
-                                }
-                            }
-                            isArchiveCreated = true
-                            errorMessage = ""
-                            // Удаляем временный файл
-                            File(tempZipPath).delete()
                         } else {
-                            errorMessage = "Ошибка создания архива"
+                            errorMessage = "Временный файл архива не найден"
                         }
                     } catch (e: Exception) {
-                        errorMessage = "Ошибка: ${e.message ?: "неизвестная ошибка"}"
+                        errorMessage = "Ошибка при сохранении: ${e.message}"
                     }
                 }
             }
         }
     )
 
-    // Функция для создания архива
     fun createArchive() {
         if (selectedFiles.isEmpty()) {
             errorMessage = "Файлы не выбраны"
             return
         }
 
-        // Запрашиваем у пользователя место для сохранения архива
-        saveArchiveLauncher.launch("archive_${System.currentTimeMillis()}.zip")
+        coroutineScope.launch {
+            try {
+                val tempDir = context.cacheDir
+                tempZipPath = File(tempDir, "temp_archive_${System.currentTimeMillis()}.zip").absolutePath
+
+                val result = viewModel.compressFiles(
+                    selectedFiles,
+                    activity,
+                    tempZipPath
+                )
+
+                if (result) {
+                    isArchiveReady = true
+                    errorMessage = ""
+                } else {
+                    errorMessage = "Ошибка при создании архива"
+                }
+            } catch (e: Exception) {
+                errorMessage = "Ошибка: ${e.message ?: "неизвестная ошибка"}"
+            }
+        }
     }
 
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
@@ -233,37 +259,32 @@ fun HomeScreen() {
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
-            onClick = {
-                filePickerLauncher.launch(arrayOf("*/*"))
-            },
-            modifier = Modifier.padding(horizontal = 16.dp)
+            onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
+            modifier = Modifier.fillMaxWidth()
         ) {
             Text(text = "Выбрать файлы")
         }
         Spacer(modifier = Modifier.height(16.dp))
 
         if (selectedFiles.isNotEmpty()) {
-            Text(text = "Выбранные файлы:")
-
+            Text(text = "Выбранные файлы (${selectedFiles.size}):")
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .height(200.dp)
+                    .padding(vertical = 8.dp)
             ) {
-                items(selectedFiles.size) { index ->
-                    val uri = selectedFiles[index]
-                    val fileName = getFileName(context, uri)
+                items(selectedFiles) { uri ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = (context.contentResolver.getType(uri)?.let { it } ?: "Неизвестный тип") + "     " + fileName,
+                            text = getFileName(context, uri),
                             style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }
@@ -272,38 +293,90 @@ fun HomeScreen() {
             Text(text = "Файлы не выбраны")
         }
 
+        if (progress > 0f && progress < 1f) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(text = "Обработка файла $currentFileIndex из $totalFiles")
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "Прогресс: ${(progress * 100).toInt()}%",
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        }
+
+        if (isArchiveReady) {
+            Text(
+                text = "Архив готов к сохранению!",
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        }
+
         Button(
-            modifier = Modifier.padding(horizontal = 16.dp),
             onClick = { createArchive() },
-            enabled = selectedFiles.isNotEmpty()
+            modifier = Modifier.fillMaxWidth(),
+            enabled = selectedFiles.isNotEmpty() && !(progress > 0f && progress < 1f)
         ) {
-            Text(text = "Создать архив")
+            Text(text = if (isArchiveReady) "Пересоздать архив" else "Создать архив")
+        }
+
+        if (isArchiveReady) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = { saveArchiveLauncher.launch("archive_${System.currentTimeMillis()}.zip") },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(text = "Сохранить архив")
+            }
         }
 
         if (errorMessage.isNotEmpty()) {
             Text(
                 text = errorMessage,
                 color = MaterialTheme.colorScheme.error,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier.padding(vertical = 8.dp)
             )
+        }
+    }
+}
+
+private fun tryOpenFolderWithArchive(context: Context, archiveUri: Uri) {
+    try {
+        val docFile = DocumentFile.fromSingleUri(context, archiveUri)
+        docFile?.let { file ->
+            val parentUri = file.parentFile?.uri
+            parentUri?.let { uri ->
+                val intent = Intent(Intent.ACTION_VIEW)
+                intent.setDataAndType(uri, "resource/folder")
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+                if (intent.resolveActivity(context.packageManager) != null) {
+                    context.startActivity(intent)
+                    return
+                }
+            }
         }
 
-        if (progress > 0f && progress < 1f) {
-            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                LinearProgressIndicator(progress = { progress })
-                Text(
-                    text = "Прогресс: ${(progress * 100).toInt()}%",
-                    modifier = Modifier.padding(8.dp)
-                )
-            }
-        } else if (isArchiveCreated) {
-            Text(
-                text = "Архив успешно создан!",
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(16.dp)
-            )
-        }
+        Toast.makeText(
+            context,
+            "Архив сохранён",
+            Toast.LENGTH_LONG
+        ).show()
+    } catch (e: Exception) {
+        Toast.makeText(
+            context,
+            "Архив сохранён, но не удалось открыть папку",
+            Toast.LENGTH_LONG
+        ).show()
     }
 }
 
@@ -315,14 +388,12 @@ fun DefaultPreview() {
     }
 }
 
+@SuppressLint("Range")
 fun getFileName(context: Context, uri: Uri): String {
     var fileName = "Неизвестный файл"
     context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
         if (cursor.moveToFirst()) {
-            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (nameIndex != -1) {
-                fileName = cursor.getString(nameIndex)
-            }
+            fileName = cursor.getString(cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME))
         }
     }
     return fileName
